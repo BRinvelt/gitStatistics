@@ -64,7 +64,6 @@ class gitStatistics:
         #TODO: Change from user focused structure to Repository focused structure to enable
         #breakout reports based on individual repositories
         self.users = {}
-        self.dayOfWeek  = [0,0,0,0,0,0,0]
 
     #Define arguments which the user may be prompted for
     @staticmethod
@@ -81,28 +80,31 @@ class gitStatistics:
         return argParser
 
     def makeWordCloud(self):
+        #Prepare for creating subplot, calculate rows/cols
         plots = len(self.users)
         cols = np.ceil(np.sqrt(plots))
         rows = np.ceil(plots/cols)
-        i = 1
+        i = 1 #index of current plot, tells plt.subplot() where to place the wordCloud
+
         plt.figure(figsize = (cols*5,rows*5), facecolor = '#f5f5f5')
-        
+        #create a wordcloud for each recorded user
         for user in self.users:
-            words = self.users.get(user)[3]
+            words = self.users.get(user)[3]#get saved commit messages
             if len(words) == 0:
                 continue
-            words = words.lower()
+            words = words.lower()#standardize case, TEST == test == TesT
 
             wordcloud = WordCloud(width = 800, height = 800,
             background_color ='#f5f5f5',
-            stopwords = set(STOPWORDS),
+            stopwords = set(STOPWORDS), #filter out insignificant words
             min_font_size = 1).generate(words)
 
+            #add wordcloud to subplot
             plt.subplot(int(rows),int(cols),i).set_title(user, fontweight = 'bold')
             plt.imshow(wordcloud)
             plt.axis("off")
             plt.tight_layout(pad = 1)
-            i+=1
+            i+=1 #iterate
         plt.savefig('gitStatWordCloud.png')
 
     def makeCSV(self):
@@ -120,7 +122,7 @@ class gitStatistics:
                 row+=[userStats[4]]#Start Date
                 row+=[userStats[5]]#Commits Per Weekday
                 outputWriter.writerow(row)
-        return
+
     def grantAwards(self):
         ##Award List
         #Most Sporadic Committer
@@ -128,6 +130,7 @@ class gitStatistics:
         #Weekend Warrior
         #
         return
+
     def graphStats(self):
         additionBar=[] 
         deletionBar=[]
@@ -145,7 +148,7 @@ class gitStatistics:
             plt.bar(userList,additionBar, color = '#6cc644',)
             plt.title("Additions per User", fontweight = 'bold')
             plt.ylabel("Number of Additions")
-            plt.xticks(rotation = 90)
+            plt.xticks(rotation = 90)#rotate names to prevent overlap if there are too many
             pdf.savefig()
 
             #Report Deletions
@@ -204,9 +207,10 @@ class gitStatistics:
                 data = json.loads(response.text)
                 data = data["data"]["repository"]
 
-                if not data:
+                if not data: #if the owner/repository combination is invalid, conitnue to next
                     continue
 
+                #parse data from response for each commit
                 data = data["ref"]["target"]["history"]["edges"]
                 for commit in data:
                     commit = commit['node']
@@ -218,15 +222,17 @@ class gitStatistics:
 
                     date = date.split("T")[0].split("-")
                     weekdayCheck = datetime.date(int(date[0]),int(date[1]),int(date[2]))
-                    weekdayCheck = weekdayCheck.weekday()
+                    weekdayCheck = weekdayCheck.weekday()#returns the day of week as an int 0=monday
 
                     if author not in self.users:
+                        #create a new user with new data
                         weekdayCommitCount = [0,0,0,0,0,0,0]
                         weekdayCommitCount[weekdayCheck]+=1
                         commits = 1
                         startDate = date
                         self.users[author] = [additions, deletions,commits,commitMessage,startDate, weekdayCommitCount]
                     else:
+                        #overwrite an existing user with combined data
                         user = self.users.get(author)
                         additions += user[0]
                         deletions += user[1]
