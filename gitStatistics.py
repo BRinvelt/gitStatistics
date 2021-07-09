@@ -286,9 +286,6 @@ class gitStatistics:
                         weekendCommit = user[5]
                         weekendCommit[weekdayCheck]+=1
                         startDate = date
-                        print (author)
-                        print(startDate)
-                        print(divmod((datetime.date(int(user[4][0]),int(user[4][1]),int(user[4][2]))-datetime.date(int(date[0]),int(date[1]),int(date[2]))).total_seconds()  ,86400)[0])
                         self.users[author] = [additions, deletions,commits,commitMessage,date, weekdayCommitCount]
 
     def execute(self):
