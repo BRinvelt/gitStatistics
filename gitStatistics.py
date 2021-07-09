@@ -9,64 +9,38 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import numpy as np
 from wordcloud import WordCloud, STOPWORDS
-##TODO:Add Comments throughout / rationalize code to improve legibility and usability
+import urllib3
+
+# just to prevent unnecessary logging since we are not verifying the host
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 queryBase = """
 query($repo: String!, $owner: String!)
 {
     repository(name: $repo, owner: $owner){
-        pullRequests(first:100){
-            nodes{
-                author{
-                    login
-                }
-                merged
-                closed
-                commits(last:100){
-                    nodes{
-                        commit{
-                            deletions
-                            additions
-                            committedDate
-                            message
-                        }
-                    }
-                }
+    ref(qualifiedName: "master") {
+      target {
+        ... on Commit {
+          id
+        history(since: "2015-01-01T01:01:00") {
+            pageInfo {
+              hasNextPage
             }
             edges {
-                cursor
-            }
-        }
-
-    }
-}
-"""
-
-queryRepeat = """
-query($repo: String!, $owner: String!, $cursor: String!)
-{
-    repository(name: $repo, owner: $owner){
-        pullRequests(first:100, after: $cursor){
-            nodes{
-                author{
-                    login
+              node {
+                oid
+                message
+                additions
+                deletions
+                author {
+                  name
+                  date
                 }
-                merged
-                closed
-                commits(last:100){
-                    nodes{
-                        commit{
-                            deletions
-                            additions
-                            committedDate
-                            message
-                        }
-                    }
-                }
+              }
             }
-            edges {
-                cursor
-            }
+          }
         }
+      }
     }
   }
 }
@@ -80,8 +54,12 @@ class gitStatistics:
         #Create a session to set default call Header information
         self.session = requests.session()
         self.session.headers = {"Authorization":"token " + self.args.apiKey}
+        self.session.verify = False
         #Set a default base URL for api calls
-        self.url = 'https://api.github.com/graphql'
+        if self.args.hostname:
+            self.url = 'https://'+ self.args.hostname +'/api/graphql'
+        else:
+            self.url = 'https://api.github.com/graphql'
 
         #TODO: Change from user focused structure to Repository focused structure to enable
         #breakout reports based on individual repositories
@@ -94,12 +72,14 @@ class gitStatistics:
         argParser = argparse.ArgumentParser(description='Gathers statistics on activity in targetted GitHub Repositories, default selection are repositories within current directory')
         argParser.add_argument("apiKey", help = 'Github api key')
         argParser.add_argument("owners", help = 'Comma separated Owner(s) of targeted Repos')
+        argParser.add_argument("--hostname", "--hn", help = 'https://<user specified hostname>/api/graphql - use for enterprise')
         argParser.add_argument("--repos","--r", help = 'Comma separated repo(s) to analyze')
         argParser.add_argument("--addr", help = 'Address of a folder containing repos or csv containing repo names')
         argParser.add_argument("--wordCloud","--wc", help = 'Generates word clouds from commit messages', action = 'store_true')
         argParser.add_argument("--graphStats","--gs", help = 'Displays Simple Graphs of data', action = 'store_true')
         argParser.add_argument("--csv", help = 'Stores recorded data as a CSV', action = 'store_true')
         return argParser
+
     def makeWordCloud(self):
         plots = len(self.users)
         cols = np.ceil(np.sqrt(plots))
@@ -108,7 +88,7 @@ class gitStatistics:
         plt.figure(figsize = (cols*5,rows*5), facecolor = '#f5f5f5')
         
         for user in self.users:
-            words = self.users.get(user)[6]
+            words = self.users.get(user)[3]
             if len(words) == 0:
                 continue
             words = words.lower()
@@ -123,24 +103,22 @@ class gitStatistics:
             plt.axis("off")
             plt.tight_layout(pad = 1)
             i+=1
-        plt.savefig('wordCloud.png')
+        plt.savefig('gitStatWordCloud.png')
 
     def makeCSV(self):
-        fields = ["User Name", "Additions", "Deletions","Pull Requests", "Commits", "Merged Requests", "Closed Requests", "Weekend Commits", "Start Date"]
+        fields = ["User Name", "Additions", "Deletions", "Commits", "Start Date", "Commits per Weekday"]
         with open('gitStatistics.csv', 'w') as csvOutput:
             outputWriter = csv.writer(csvOutput)
             outputWriter.writerow(fields)
+            #Write each user to CSV
             for user in self.users:
                 userStats = self.users.get(user)
-                row = [user]
-                row+=[userStats[0]]
-                row+=[userStats[1]]
-                row+=[userStats[2]]
-                row+=[userStats[3]]
-                row+=[userStats[4]]
-                row+=[userStats[5]]
-                row+=[userStats[7]]
-                row+=[userStats[8]]
+                row = [user]#User Name
+                row+=[userStats[0]]#Additions
+                row+=[userStats[1]]#Deletions
+                row+=[userStats[2]]#Commits
+                row+=[userStats[4]]#Start Date
+                row+=[userStats[5]]#Commits Per Weekday
                 outputWriter.writerow(row)
         return
     def grantAwards(self):
@@ -151,68 +129,46 @@ class gitStatistics:
         #
         return
     def graphStats(self):
-        #Graph General Data
-        additionBar=[] #0
-        deletionBar=[] #1
-        pullBar=[] #2
-        mergeBar=[] #4
-        closeBar=[] #5
+        additionBar=[] 
+        deletionBar=[]
+        userList = []
         
+        #Put Addition and Deletion data in lists for plotting
         for user in self.users:
             additionBar.append(self.users.get(user)[0])
             deletionBar.append(self.users.get(user)[1])
-            pullBar.append(self.users.get(user)[2])
-            mergeBar.append(self.users.get(user)[4])
-            closeBar.append(self.users.get(user)[5])
+            userList.append(user)
 
-        with PdfPages('multipage_pdf.pdf') as pdf:
-            #Report Addition and Deletion Statistics
-            barWidth = .25
-            br1 = np.arange(len(additionBar))
-            br2 = [x + barWidth for x in br1]
-            figAddDel = plt.subplots(figsize = (12,10), facecolor = '#f5f5f5')
-            plt.bar(br1,additionBar,width=barWidth,color = '#6cc644',label = 'Total Additions')
-            plt.bar(br2,deletionBar,width=barWidth, color ='#bd2c00',label = 'Total Deletions')
-            plt.xticks([r+barWidth/2 for r in range(len(additionBar))],self.users)
+        with PdfPages('gitStatGraphs.pdf') as pdf:
+            #Report Additions
+            plt.figure(figsize = (12,10), facecolor = '#f5f5f5')
+            plt.bar(userList,additionBar, color = '#6cc644',)
+            plt.title("Additions per User", fontweight = 'bold')
+            plt.ylabel("Number of Additions")
             plt.xticks(rotation = 90)
-            plt.title("Commit Additions and Deletions", fontweight = 'bold')
-            plt.legend()
             pdf.savefig()
 
-            #Report Pull Request Outcomes
-            barWidth = .25
-            br1 = np.arange(len(additionBar))
-            br2 = [x + barWidth for x in br1]
-            br3 = [x + barWidth for x in br2]
-            figPMC = plt.subplots(figsize = (12,10), facecolor = '#f5f5f5')
-            plt.bar(br1,pullBar,width=barWidth, color = '#4078c0',label = 'Pull Requests')
-            plt.bar(br2,mergeBar,width=barWidth, color ='#6cc644',label = 'Merged Requests')
-            plt.bar(br3,closeBar,width=barWidth, color ='#bd2c00',label = 'Closed (unmerged) Requests')
-            plt.xticks([r + barWidth for r in range(len(additionBar))],self.users)
+            #Report Deletions
+            plt.figure(figsize = (12,10), facecolor = '#f5f5f5')
+            plt.bar(userList,deletionBar, color = '#bd2c00',)
+            plt.title("Deletions per User", fontweight = 'bold')
+            plt.ylabel("Number of Deletions")
             plt.xticks(rotation = 90)
-            plt.title("Pull Request Outcomes", fontweight = 'bold')
-            plt.legend()
             pdf.savefig()
 
             #Report Daily Commits
             dayNames = ["Mon","Tue","Wed","Thur","Fri","Sat","Sun"]
-            figDaily = plt.figure(figsize = (12,10), facecolor = '#f5f5f5')
-            plt.bar(dayNames,self.dayOfWeek, color = '#4078c0',)
-            plt.title("Commits per day of Week", fontweight = 'bold')
-            userWW = None
+            commitDays = [0,0,0,0,0,0,0]
+            #Sum commits per day of week
             for user in self.users:
-                if userWW == None:
-                    if self.users.get(user)[7]>0:
-                        userWW = user
-                else:
-                    if self.users.get(userWW)[7] < self.users.get(user)[7]:
-                        userWW = user
-            if userWW != None:
-                plt.xlabel("Weekend Warrior: "+ userWW +" made the most Weekend Commits", fontweight = 'bold')
+                userDays = self.users.get(user)[5]
+                for i in range(7):
+                    commitDays[i] = commitDays[i] + userDays[i]
+            plt.figure(figsize = (12,10), facecolor = '#f5f5f5')
+            plt.bar(dayNames,commitDays, color = '#4078c0',)
+            plt.title("Commits per day of Week", fontweight = 'bold')
             plt.ylabel("Number of Commits")
             pdf.savefig()
-        #Give Awards
-        return
 
     def getStats(self):
         ##Compile list of target repositories
@@ -239,77 +195,47 @@ class gitStatistics:
 
         #Load List of Repository Owners
         owners = self.args.owners.split(',')
-        #Initialize Dictionary for Key Users and stats
 
         for repo in repos:
             for owner in owners:
 
                 params = {"repo":repo,"owner":owner}
                 response = self.session.post(self.url,json={'query':queryBase, 'variables':params})
-                while True:
-                    data = json.loads(response.text)
-                    data = data["data"]["repository"]
+                data = json.loads(response.text)
+                data = data["data"]["repository"]
 
-                    if not data:
-                        break
+                if not data:
+                    continue
 
-                    for cursor in data["pullRequests"]["edges"]:
-                        lastCursor = cursor.get("cursor")
+                data = data["ref"]["target"]["history"]["edges"]
+                for commit in data:
+                    commit = commit['node']
+                    author = commit["author"]["name"]
+                    date = commit["author"]["date"]
+                    commitMessage = commit["message"]
+                    additions = commit["additions"]
+                    deletions = commit["deletions"]
 
-                    pullCount = len(data["pullRequests"]["nodes"])
-                    data = data["pullRequests"]["nodes"]
-                    for pullRequest in data:
-                        author = pullRequest["author"]["login"]
-                        merged = pullRequest["merged"]
-                        if not merged:
-                            closed = pullRequest["closed"]
-                        else:
-                            closed = False
+                    date = date.split("T")[0].split("-")
+                    weekdayCheck = datetime.date(int(date[0]),int(date[1]),int(date[2]))
+                    weekdayCheck = weekdayCheck.weekday()
 
-                        pullRequest = pullRequest["commits"]["nodes"]
-                        additions = 0
-                        deletions = 0
-                        commits = 0
-                        commitText = ""
-                        weekendCommit = 0
-                        startDate = None
-
-                        for commit in pullRequest:
-                            commit = commit["commit"]
-                            additions += commit["additions"]
-                            deletions += commit["deletions"]
-                            commits += 1
-                            commitText += (commit["message"]+" ").replace("\n"," ")
-
-                            commitDate = commit["committedDate"]
-                            commitDate = commitDate.split("T")[0].split("-")
-                            commitDate = datetime.date(int(commitDate[0]),int(commitDate[1]),int(commitDate[2]))
-                            if startDate is None:
-                                startDate = commitDate
-                            commitDate = commitDate.weekday()
-                            self.dayOfWeek[commitDate]+=1
-                            if commitDate > 4:
-                                weekendCommit+=1
-
-                        if author not in self.users:
-                            self.users[author] = [additions, deletions,1,commits,int(merged),int(closed),commitText,weekendCommit,startDate]
-                        else:
-                            user = self.users.get(author)
-                            additions += user[0]
-                            deletions += user[1]
-                            pullRequestCount = user[2]+1
-                            commits += user[3]
-                            merges = int(merged) + user[4]
-                            closes = int(closed) + user[5]
-                            commitText += user[6]
-                            weekendCommit += user[7]
-                            startDate = user[8]
-                            self.users[author] = [additions, deletions,pullRequestCount,commits,merges,closes,commitText,weekendCommit,startDate]
-                    if pullCount == 100:
-                        params = {"repo":repo,"owner":owner,"cursor":str(lastCursor)}
-                        response = requests.post(self.url,json={'query':queryRepeat, 'variables':params})
+                    if author not in self.users:
+                        weekdayCommitCount = [0,0,0,0,0,0,0]
+                        weekdayCommitCount[weekdayCheck]+=1
+                        commits = 1
+                        startDate = date
+                        self.users[author] = [additions, deletions,commits,commitMessage,startDate, weekdayCommitCount]
                     else:
-                        break
+                        user = self.users.get(author)
+                        additions += user[0]
+                        deletions += user[1]
+                        commits += user[2]
+                        commitMessage += user[3]
+                        weekendCommit = user[5]
+                        weekendCommit[weekdayCheck]+=1
+                        startDate = date
+                        self.users[author] = [additions, deletions,commits,commitMessage,date, weekdayCommitCount]
     def execute(self):
         self.getStats()
         if self.args.wordCloud:
