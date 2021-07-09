@@ -230,7 +230,7 @@ class gitStatistics:
                         user = self.users.get(author)
                         additions += user[0]
                         deletions += user[1]
-                        commits += user[2]
+                        commits = user[2] + 1
                         commitMessage += user[3]
                         weekendCommit = user[5]
                         weekendCommit[weekdayCheck]+=1
