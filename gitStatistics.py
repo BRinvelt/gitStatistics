@@ -5,6 +5,7 @@ import json
 import sys
 import csv
 import datetime
+import re
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import numpy as np
@@ -112,7 +113,7 @@ class gitStatistics:
         plt.savefig('gitStatWordCloud.png')
 
     def makeCSV(self):
-        fields = ["User Name", "Additions", "Deletions", "Commits", "Start Date", "Commits per Weekday"]
+        fields = ["User Name", "Additions", "Deletions", "Commits", "Commits per Weekday", "Commit Times"]
         with open('gitStatistics.csv', 'w') as csvOutput:
             outputWriter = csv.writer(csvOutput)
             outputWriter.writerow(fields)
@@ -123,8 +124,8 @@ class gitStatistics:
                 row+=[userStats[0]]#Additions
                 row+=[userStats[1]]#Deletions
                 row+=[userStats[2]]#Commits
-                row+=[userStats[4]]#Start Date
-                row+=[userStats[5]]#Commits Per Weekday
+                row+=[userStats[4]]#Commits Per Weekday
+                row+=[userStats[5]]#Commit Times
                 outputWriter.writerow(row)
 
     def grantAwards(self):
@@ -136,10 +137,24 @@ class gitStatistics:
         additionUser = None
         additionScore = None
         additionCommits = None
+        sporadicUser = None
+        sporadicScore = None
+        consistentUser = None
+        consistentScore = None
+        hareUser = None
+        hareScore = None
+        tortiseUser = None
+        tortiseScore = None
+        verboseUser = None
+        verboseScore = None
+        earlyUser = None
+        earlyScore = None
+        lateUser = None
+        lateScore = None
         for user in self.users:
             userStats = self.users.get(user)
             #Weekend Warrior
-            userScore = userStats[5][5] + userStats[5][6]
+            userScore = userStats[4][5] + userStats[4][6]
             if weekendUser is not None:
                 if userScore > weekendScore:
                     weekendUser = user
@@ -153,11 +168,11 @@ class gitStatistics:
                 if userScore > committedScore:
                     committedUser = user
                     committedScore = userScore
-                    committedDate = userStats[4]
+                    committedDate = userStats[5][1]
             else:
                 committedUser = user
                 committedScore = userScore
-                committedDate = userStats[4]
+                committedDate = userStats[5][1]
             #Heavy Hitter
             userScore = userStats[0] / userStats[2]
             if additionUser is not None:
@@ -169,10 +184,86 @@ class gitStatistics:
                 additionUser = user
                 additionScore = userScore
                 additionCommits = userStats[2]
+            #Sporadic/Consistent/hare Committer
+            if userStats[2] > 2:
+                try:
+                    userTimeBetweenCommits = []
+                    mean = 0
+                    for i in range(userStats[2]-1):
+                        curTime = userStats[5][i]
+                        nextTime = userStats[5][i+1]
+                        userTimeBetweenCommits += [nextTime-curTime]
+                        mean += nextTime-curTime
+                    mean = mean/len(userTimeBetweenCommits)
+                    userScore = np.std(userTimeBetweenCommits)/mean*100
+                    if sporadicUser is not None:
+                        if userScore > sporadicScore:
+                            sporadicUser = user
+                            sporadicScore = userScore
+                    else:
+                        sporadicUser = user
+                        sporadicScore = userScore
+                    if consistentUser is not None:
+                        if userScore < consistentScore:
+                            consistentUser = user
+                            consistentScore = userScore
+                    else:
+                        consistentUser = user
+                        consistentScore = userScore
+                    if hareUser is not None:
+                        if mean < hareScore:
+                            hareUser = user
+                            hareScore = mean
+                    else:
+                        hareUser = user
+                        hareScore = mean
+                    if tortiseUser is not None:
+                        if mean > tortiseScore:
+                            tortiseUser = user
+                            tortiseScore = mean
+                    else:
+                        tortiseUser = user
+                        tortiseScore = mean
+                except ZeroDivisionError:
+                    pass
+            #Verbose Committer
+            userScore = len(userStats[3].split(" "))/userStats[2]
+            if verboseUser is not None:
+                if userScore > verboseScore:
+                    verboseUser = user
+                    verboseScore = userScore
+            else:
+                verboseUser = user
+                verboseScore = userScore
+            #Night Owl
+            userScore = userStats[6]
+            if lateUser is not None:
+                if userScore > lateScore:
+                    lateUser = user
+                    lateScore = userScore
+            else:
+                lateUser = user
+                lateScore = userScore
+            #Early Bird
+            userScore = userStats[7]
+            if earlyUser is not None:
+                if userScore > earlyScore:
+                    earlyUser = user
+                    earlyScore = userScore
+            else:
+                earlyUser = user
+                earlyScore = userScore
 
         print(weekendUser,"is the WEEKEND WARRIOR with",weekendScore,"commits logged on weekends")
-        print(committedUser,"is the COMMITTED COMMITTER with",committedScore,"commits logged since joining on",committedDate[1],"/",committedDate[2],"of",committedDate[0])
-        print("Watch out for this HEAVY HITTER...",additionUser,"has averaged",additionScore,"additions over",additionCommits,"commits")
+        print(committedUser,"is the COMMITTED COMMITTER with",committedScore,"commits logged since joining at",datetime.datetime.fromtimestamp(committedDate))
+        print("Watch out for this HEAVY HITTER...",additionUser,"has averaged",int(additionScore),"additions over",additionCommits,"commits")
+        print(sporadicUser,"is the most SPORADIC COMMITTER with a commit interval variation coefficient of",str(int(sporadicScore))+ "%")
+        print(consistentUser,"is the most CONSISTENT COMMITTER with a commit interval variation coefficient of only ",str(int(consistentScore))+"%")
+        print(tortiseUser,"is the TORTISE with a mean commit interval of",int(tortiseScore/60/60),"hours")
+        print(hareUser,"is the HARE with a mean commit interval of only",int(hareScore/60/60),"hours")
+        print(verboseUser,"is the most VERBOSE COMMITTER, averaging",verboseScore,"words per commit")
+        print(earlyUser,"is an EARLY BIRD with the most early morning commits")
+        print(lateUser,"is the NIGHT OWL with the most late night commits")
 
     def graphStats(self):
         additionBar=[] 
@@ -220,8 +311,8 @@ class gitStatistics:
         ##Compile list of target repositories
         repos = []
         #Load from address
-        if self.args.addr:
-            if "." in self.args.addr:
+        if self.args.addr:#If there is an addr to load from
+            if "." in self.args.addr:#If the addr points to a .csv file, read each line
                 if self.args.addr.split(".")[1] == "csv":
                     try:
                         with open(self.args.addr) as csvInput:
@@ -231,13 +322,19 @@ class gitStatistics:
                     except FileNotFoundError:
                         print("Indicated CSV does not exist")
                 else:
-                    repos = os.listdir(self.args.addr)
+                    print("Invalid file type")
+                    return
             else:
-                repos = os.listdir(self.args.addr)
+                try:
+                    repos = os.listdir(self.args.addr)
+                except FileNotFoundError:
+                    print("Invalid directory address")
+                    return
         else:
-            repos = os.listdir(os.curdir)
-        if self.args.repos:
-            repos += self.args.repos.split(",")
+            if self.args.repos:
+                repos += self.args.repos.split(",")
+            else:
+                repos = os.listdir(os.curdir)
 
         #Load List of Repository Owners
         owners = self.args.owners.split(',')
@@ -251,6 +348,7 @@ class gitStatistics:
 
                 if not data: #if the owner/repository combination is invalid, conitnue to next
                     continue
+
                 data = data["ref"]
                 if not data:
                     continue
@@ -265,8 +363,17 @@ class gitStatistics:
                     additions = commit["additions"]
                     deletions = commit["deletions"]
 
-                    date = date.split("T")[0].split("-")
-                    weekdayCheck = datetime.date(int(date[0]),int(date[1]),int(date[2]))
+                    commitDate = date.split('T')[0].split("-")
+                    commitTime = date.split('T')[1].split(":")
+                    nightOwl = 0
+                    earlyBird = 0
+                    if(int(commitTime[0])>=20):
+                        nightOwl = 1
+                    else:
+                        if(int(commitTime[0])<=8):
+                            earlyBird = 1
+                    weekdayCheck = datetime.datetime(int(commitDate[0]),int(commitDate[1]),int(commitDate[2]),int(commitTime[0]),int(commitTime[1]))
+                    sinceEpoch = weekdayCheck.timestamp()
                     weekdayCheck = weekdayCheck.weekday()#returns the day of week as an int 0=monday
 
                     if author not in self.users:
@@ -274,8 +381,8 @@ class gitStatistics:
                         weekdayCommitCount = [0,0,0,0,0,0,0]
                         weekdayCommitCount[weekdayCheck]+=1
                         commits = 1
-                        startDate = date
-                        self.users[author] = [additions, deletions,commits,commitMessage,startDate, weekdayCommitCount]
+                        commitTimes = [sinceEpoch]
+                        self.users[author] = [additions, deletions,commits,commitMessage, weekdayCommitCount,commitTimes,nightOwl,earlyBird]
                     else:
                         #overwrite an existing user with combined data
                         user = self.users.get(author)
@@ -283,10 +390,13 @@ class gitStatistics:
                         deletions += user[1]
                         commits = user[2] + 1
                         commitMessage += user[3]
-                        weekendCommit = user[5]
+                        weekendCommit = user[4]
                         weekendCommit[weekdayCheck]+=1
-                        startDate = date
-                        self.users[author] = [additions, deletions,commits,commitMessage,date, weekdayCommitCount]
+                        commitTimes = user[5] + [sinceEpoch]
+                        commitTimes.sort()
+                        nightOwl += user[6]
+                        earlyBird += user[7]
+                        self.users[author] = [additions, deletions,commits,commitMessage, weekdayCommitCount,commitTimes,nightOwl,earlyBird]
 
     def execute(self):
         self.getStats()
