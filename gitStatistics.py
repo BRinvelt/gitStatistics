@@ -5,9 +5,10 @@ import json
 import sys
 import csv
 import datetime
-import re
 import matplotlib.pyplot as plt
+from matplotlib.transforms import Bbox
 from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib.colors import ListedColormap
 import numpy as np
 from wordcloud import WordCloud, STOPWORDS
 import urllib3
@@ -77,6 +78,7 @@ class gitStatistics:
         argParser.add_argument("--branch","--b", help = 'User defined target branch, default is master')
         argParser.add_argument("--hostname", "--hn", help = 'https://<user specified hostname>/api/graphql - use for enterprise')
         argParser.add_argument("--repos","--r", help = 'Comma separated repo(s) to analyze')
+        argParser.add_argument("--excludeRepos", "--er",  help = 'Comma separated repo(s) to exclude')
         argParser.add_argument("--addr", help = 'Address of a folder containing repos or csv containing repo names')
         argParser.add_argument("--wordCloud","--wc", help = 'Generates word clouds from commit messages', action = 'store_true')
         argParser.add_argument("--graphStats","--gs", help = 'Displays Simple Graphs of data', action = 'store_true')
@@ -87,30 +89,39 @@ class gitStatistics:
     def makeWordCloud(self):
         #Prepare for creating subplot, calculate rows/cols
         plots = len(self.users)
-        cols = np.ceil(np.sqrt(plots))
-        rows = np.ceil(plots/cols)
+        cols = int(np.ceil(np.sqrt(plots)))
+        rows = int(np.ceil(plots/cols))
         i = 1 #index of current plot, tells plt.subplot() where to place the wordCloud
+        with PdfPages('wordClouds.pdf') as pdf:
+            plt.figure(figsize = (cols*5,rows*5), facecolor = '#d5d8de')
+            #create a wordcloud for each recorded user
+            for user in self.users:
+                words = self.users.get(user)[3]#get saved commit messages
+                if len(words) == 0:
+                    continue
+                words = words.lower()#standardize case, TEST == test == TesT
 
-        plt.figure(figsize = (cols*5,rows*5), facecolor = '#f5f5f5')
-        #create a wordcloud for each recorded user
-        for user in self.users:
-            words = self.users.get(user)[3]#get saved commit messages
-            if len(words) == 0:
-                continue
-            words = words.lower()#standardize case, TEST == test == TesT
+                wordcloud = WordCloud(width = 800, height = 800,
+                background_color ='#d5d8de',
+                stopwords = set(STOPWORDS), #filter out insignificant words
+                min_font_size = 1,
+                colormap='Blues').generate(words)
 
-            wordcloud = WordCloud(width = 800, height = 800,
-            background_color ='#f5f5f5',
-            stopwords = set(STOPWORDS), #filter out insignificant words
-            min_font_size = 1).generate(words)
+                #add wordcloud to subplot
+                ax = plt.subplot(int(rows),int(cols),i).set_title(user, fontweight = 'bold')
+                plt.imshow(wordcloud)
+                plt.axis("off")
+                plt.tight_layout(pad = 1)
 
-            #add wordcloud to subplot
-            plt.subplot(int(rows),int(cols),i).set_title(user, fontweight = 'bold')
-            plt.imshow(wordcloud)
-            plt.axis("off")
-            plt.tight_layout(pad = 1)
-            i+=1 #iterate
-        plt.savefig('gitStatWordCloud.png')
+                i+=1 #iterate    
+            pdf.savefig()
+            for r in range(rows):
+                for c in range(cols):
+                    pdf.savefig(bbox_inches=Bbox.from_bounds(c*5, (rows-r-1)*5, 5, 5))
+                    i-=1
+                    if i == 1:
+                        return
+
 
     def makeCSV(self):
         fields = ["User Name", "Additions", "Deletions", "Commits", "Commits per Weekday", "Commit Times"]
@@ -151,6 +162,10 @@ class gitStatistics:
         earlyScore = None
         lateUser = None
         lateScore = None
+        shortestCommitUser = None
+        shortestCommit = None
+        longestCommitUser = None
+        longestCommit = None
         for user in self.users:
             userStats = self.users.get(user)
             #Weekend Warrior
@@ -253,6 +268,23 @@ class gitStatistics:
             else:
                 earlyUser = user
                 earlyScore = userScore
+            #Shortest/Longest Commits
+            userShortCommit = userStats[8]
+            userLongCommit = userStats[9]
+            if longestCommitUser is not None:
+                if len(userLongCommit)>len(longestCommit):
+                    longestCommitUser = user
+                    longestCommit = userLongCommit
+            else:
+                longestCommitUser = user
+                longestCommit = userLongCommit
+            if shortestCommitUser is not None:
+                if len(userShortCommit)<len(shortestCommit):
+                    shortestCommitUser = user
+                    shortestCommit = userShortCommit
+            else:
+                shortestCommitUser = user
+                shortestCommit = userShortCommit
 
         print(weekendUser,"is the WEEKEND WARRIOR with",weekendScore,"commits logged on weekends")
         print(committedUser,"is the COMMITTED COMMITTER with",committedScore,"commits logged since joining at",datetime.datetime.fromtimestamp(committedDate))
@@ -264,6 +296,8 @@ class gitStatistics:
         print(verboseUser,"is the most VERBOSE COMMITTER, averaging",verboseScore,"words per commit")
         print(earlyUser,"is an EARLY BIRD with the most early morning commits")
         print(lateUser,"is the NIGHT OWL with the most late night commits")
+        print(longestCommitUser,"turned in the LONGEST COMMIT MESSAGE -",longestCommit)
+        print(shortestCommitUser,"turned in the SHORTEST COMMIT MESSAGE -",shortestCommit)
 
     def graphStats(self):
         additionBar=[] 
@@ -298,7 +332,7 @@ class gitStatistics:
             commitDays = [0,0,0,0,0,0,0]
             #Sum commits per day of week
             for user in self.users:
-                userDays = self.users.get(user)[5]
+                userDays = self.users.get(user)[4]
                 for i in range(7):
                     commitDays[i] = commitDays[i] + userDays[i]
             plt.figure(figsize = (12,10), facecolor = '#f5f5f5')
@@ -335,6 +369,11 @@ class gitStatistics:
                 repos += self.args.repos.split(",")
             else:
                 repos = os.listdir(os.curdir)
+        #Remove excluded Repos from Repos
+        if self.args.excludeRepos:
+            for repo in self.args.excludeRepos:
+                if repo in repos:
+                    repos.pop(repos.index(repo))
 
         #Load List of Repository Owners
         owners = self.args.owners.split(',')
@@ -356,6 +395,8 @@ class gitStatistics:
                 #parse data from response for each commit
                 data = data["target"]["history"]["edges"]
                 for commit in data:
+                    if commit == None:
+                        continue
                     commit = commit['node']
                     author = commit["author"]["name"]
                     date = commit["author"]["date"]
@@ -382,21 +423,31 @@ class gitStatistics:
                         weekdayCommitCount[weekdayCheck]+=1
                         commits = 1
                         commitTimes = [sinceEpoch]
-                        self.users[author] = [additions, deletions,commits,commitMessage, weekdayCommitCount,commitTimes,nightOwl,earlyBird]
+                        shortestCommit = commitMessage
+                        longestCommit = commitMessage
+                        self.users[author] = [additions, deletions,commits,commitMessage, weekdayCommitCount,commitTimes,nightOwl,earlyBird,shortestCommit,longestCommit]
                     else:
                         #overwrite an existing user with combined data
                         user = self.users.get(author)
+
+                        shortestCommit = user[8]
+                        if len(commitMessage) < len(shortestCommit):
+                            shortestCommit = commitMessage
+                        longestCommit = user[9]
+                        if len(commitMessage) > len(longestCommit):
+                            longestCommit = commitMessage
+
                         additions += user[0]
                         deletions += user[1]
                         commits = user[2] + 1
                         commitMessage += user[3]
-                        weekendCommit = user[4]
-                        weekendCommit[weekdayCheck]+=1
+                        weekdayCommitCount = user[4]
+                        weekdayCommitCount[weekdayCheck]+=1
                         commitTimes = user[5] + [sinceEpoch]
                         commitTimes.sort()
                         nightOwl += user[6]
                         earlyBird += user[7]
-                        self.users[author] = [additions, deletions,commits,commitMessage, weekdayCommitCount,commitTimes,nightOwl,earlyBird]
+                        self.users[author] = [additions, deletions,commits,commitMessage, weekdayCommitCount,commitTimes,nightOwl,earlyBird,shortestCommit,longestCommit]
 
     def execute(self):
         self.getStats()
