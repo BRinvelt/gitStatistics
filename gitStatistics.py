@@ -4,11 +4,11 @@ import os
 import json
 import sys
 import csv
+import textwrap
 import datetime
 import matplotlib.pyplot as plt
 from matplotlib.transforms import Bbox
 from matplotlib.backends.backend_pdf import PdfPages
-from matplotlib.colors import ListedColormap
 import numpy as np
 from wordcloud import WordCloud, STOPWORDS
 import urllib3
@@ -55,6 +55,14 @@ class gitStatistics:
         self.args = self.argParser.parse_args(args)
         if not self.args.branch:
             self.args.branch = "master"
+        if not self.args.startTime:
+            self.args.startTime = 0
+        else:
+            self.args.startTime = int(self.args.startTime)
+        if not self.args.endTime:
+            self.args.endTime = datetime.datetime.utcnow().timestamp()
+        else:
+            self.args.endTime = int(self.args.endTime)
         #Create a session to set default call Header information
         self.session = requests.session()
         self.session.headers = {"Authorization":"token " + self.args.apiKey}
@@ -77,13 +85,15 @@ class gitStatistics:
         argParser.add_argument("owners", help = 'Comma separated Owner(s) of targeted Repos')
         argParser.add_argument("--branch","--b", help = 'User defined target branch, default is master')
         argParser.add_argument("--hostname", "--hn", help = 'https://<user specified hostname>/api/graphql - use for enterprise')
-        argParser.add_argument("--repos","--r", help = 'Comma separated repo(s) to analyze')
+        argParser.add_argument("--repos","--r", help = 'Additional Repos to analyze - Comma separated repo(s)')
         argParser.add_argument("--excludeRepos", "--er",  help = 'Comma separated repo(s) to exclude')
         argParser.add_argument("--addr", help = 'Address of a folder containing repos or csv containing repo names')
         argParser.add_argument("--wordCloud","--wc", help = 'Generates word clouds from commit messages', action = 'store_true')
         argParser.add_argument("--graphStats","--gs", help = 'Displays Simple Graphs of data', action = 'store_true')
         argParser.add_argument("--csv", help = 'Stores recorded data as a CSV', action = 'store_true')
         argParser.add_argument("--awards","--aw", help = 'Prints awards/titles for users based on their statistics', action = 'store_true')
+        argParser.add_argument("--startTime","--st", help ='Earliest commit time since epoch to accept (seconds)')
+        argParser.add_argument("--endTime","--et", help = 'Latest commit time since epoch to accept (seconds)')
         return argParser
 
     def makeWordCloud(self):
@@ -296,8 +306,13 @@ class gitStatistics:
         print(verboseUser,"is the most VERBOSE COMMITTER, averaging",verboseScore,"words per commit")
         print(earlyUser,"is an EARLY BIRD with the most early morning commits")
         print(lateUser,"is the NIGHT OWL with the most late night commits")
-        print(longestCommitUser,"turned in the LONGEST COMMIT MESSAGE -",longestCommit)
-        print(shortestCommitUser,"turned in the SHORTEST COMMIT MESSAGE -",shortestCommit)
+
+        wrapper = textwrap.TextWrapper(initial_indent='\t"',subsequent_indent = '\t', width=70)
+        print(longestCommitUser,"turned in the LONGEST COMMIT MESSAGE:")
+        print(wrapper.fill(longestCommit)+'"')
+        print(shortestCommitUser,"turned in the SHORTEST COMMIT MESSAGE:")
+        print(wrapper.fill(shortestCommit)+'"')
+
 
     def graphStats(self):
         additionBar=[] 
@@ -365,10 +380,10 @@ class gitStatistics:
                     print("Invalid directory address")
                     return
         else:
-            if self.args.repos:
-                repos += self.args.repos.split(",")
-            else:
-                repos = os.listdir(os.curdir)
+            repos = os.listdir(os.curdir)
+        if self.args.repos:
+            repos += self.args.repos.split(",")
+
         #Remove excluded Repos from Repos
         if self.args.excludeRepos:
             self.args.excludeRepos = self.args.excludeRepos.split(',')
@@ -396,27 +411,33 @@ class gitStatistics:
                 #parse data from response for each commit
                 data = data["target"]["history"]["edges"]
                 for commit in data:
-                    if commit == None:
-                        continue
-                    commit = commit['node']
-                    author = commit["author"]["name"]
-                    date = commit["author"]["date"]
-                    commitMessage = commit["message"]
-                    additions = commit["additions"]
-                    deletions = commit["deletions"]
+                    try:
 
-                    commitDate = date.split('T')[0].split("-")
-                    commitTime = date.split('T')[1].split(":")
-                    nightOwl = 0
-                    earlyBird = 0
-                    if(int(commitTime[0])>=20):
-                        nightOwl = 1
-                    else:
-                        if(int(commitTime[0])<=8):
-                            earlyBird = 1
-                    weekdayCheck = datetime.datetime(int(commitDate[0]),int(commitDate[1]),int(commitDate[2]),int(commitTime[0]),int(commitTime[1]))
-                    sinceEpoch = weekdayCheck.timestamp()
-                    weekdayCheck = weekdayCheck.weekday()#returns the day of week as an int 0=monday
+                        commit = commit['node']
+                        
+                        date = commit["author"]["date"]
+                        commitDate = date.split('T')[0].split("-")
+                        commitTime = date.split('T')[1].split(":")
+                        weekdayCheck = datetime.datetime(int(commitDate[0]),int(commitDate[1]),int(commitDate[2]),int(commitTime[0]),int(commitTime[1]))
+                        sinceEpoch = weekdayCheck.timestamp()
+                        if not (self.args.startTime <= sinceEpoch < self.args.endTime):
+                            continue
+                        weekdayCheck = weekdayCheck.weekday()#returns the day of week as an int 0=monday
+
+                        nightOwl = 0
+                        earlyBird = 0
+                        if(int(commitTime[0])>=20):
+                            nightOwl = 1
+                        else:
+                            if(int(commitTime[0])<=8):
+                                earlyBird = 1
+
+                        author = commit["author"]["name"]
+                        commitMessage = commit["message"]
+                        additions = commit["additions"]
+                        deletions = commit["deletions"]
+                    except AttributeError:
+                        continue
 
                     if author not in self.users:
                         #create a new user with new data
