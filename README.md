@@ -11,7 +11,7 @@ This command attempts to execute the script on any repositories located within t
 
 ## Optional Arguments
 - --branch, --b: User defined target branch, default is master
-- --hostname, --hn: https://user specified hostname/api/graphql - use for enterprise GitHubs
+- --hostname, --hn: https://user-specified-hostname/api/graphql - use for enterprise GitHubs
 - --repos, --r: Additional Repos to analyze - Comma separated repo(s)
 - --excludeRepos, --er: Comma separated repo(s) to exclude
 - --addr: Address of a folder containing repos or csv containing repo names
