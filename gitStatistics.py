@@ -371,6 +371,7 @@ class gitStatistics:
                 repos = os.listdir(os.curdir)
         #Remove excluded Repos from Repos
         if self.args.excludeRepos:
+            self.args.excludeRepos = self.args.excludeRepos.split(',')
             for repo in self.args.excludeRepos:
                 if repo in repos:
                     repos.pop(repos.index(repo))
